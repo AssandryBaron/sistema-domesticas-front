@@ -1,127 +1,147 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect } from "react";
+import * as tareaService from "../services/tareaService";
+import { useAuth } from "./AuthContext";
 
-export type TaskPriority = 'low' | 'medium' | 'high';
-export type TaskStatus = 'pending' | 'in-progress' | 'completed';
+export type TaskPriority = "LOW" | "MEDIUM" | "HIGH";
+export type TaskStatus = "PENDIENTE" | "EN_PROCESO" | "COMPLETADA";
 
 export interface Task {
   id: string;
   title: string;
   description: string;
-  assignedTo: string | null; // user ID
-  assignedToName?: string;
   priority: TaskPriority;
   status: TaskStatus;
   dueDate: string;
-  createdAt: string;
+  assignedTo: string | null;
+  usuarioAsignadoNombre?: string | null; // Nuevo campo sincronizado con el Backend
   createdBy: string;
 }
 
 interface TaskContextType {
   tasks: Task[];
-  addTask: (task: Omit<Task, 'id' | 'createdAt'>) => void;
-  updateTask: (id: string, updates: Partial<Task>) => void;
-  deleteTask: (id: string) => void;
-  assignTask: (taskId: string, userId: string, userName: string) => void;
+  addTask: (taskData: Omit<Task, "id">) => Promise<boolean>;
+  deleteTask: (id: string) => Promise<void>;
+  assignTask: (taskId: string, userId: string) => Promise<void>;
+  refreshTasks: () => Promise<void>;
+  isLoading: boolean;
 }
 
 const TaskContext = createContext<TaskContextType | undefined>(undefined);
 
-// Tareas mock iniciales
-const INITIAL_TASKS: Task[] = [
-  {
-    id: '1',
-    title: 'Limpiar la cocina',
-    description: 'Limpiar mesadas, lavar platos y barrer el piso',
-    assignedTo: '2',
-    assignedToName: 'Carlos Rodríguez',
-    priority: 'high',
-    status: 'pending',
-    dueDate: '2026-03-18',
-    createdAt: '2026-03-15',
-    createdBy: '1',
-  },
-  {
-    id: '2',
-    title: 'Sacar la basura',
-    description: 'Sacar todas las bolsas de basura y reciclaje',
-    assignedTo: '3',
-    assignedToName: 'María López',
-    priority: 'medium',
-    status: 'in-progress',
-    dueDate: '2026-03-17',
-    createdAt: '2026-03-15',
-    createdBy: '1',
-  },
-  {
-    id: '3',
-    title: 'Limpiar baño',
-    description: 'Limpiar inodoro, lavabo y ducha',
-    assignedTo: '4',
-    assignedToName: 'Juan Martínez',
-    priority: 'high',
-    status: 'completed',
-    dueDate: '2026-03-16',
-    createdAt: '2026-03-14',
-    createdBy: '1',
-  },
-  {
-    id: '4',
-    title: 'Aspirar alfombras',
-    description: 'Aspirar todas las alfombras de la sala y dormitorios',
-    assignedTo: null,
-    priority: 'low',
-    status: 'pending',
-    dueDate: '2026-03-20',
-    createdAt: '2026-03-16',
-    createdBy: '1',
-  },
-];
+export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({
+  children,
+}) => {
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const { user } = useAuth();
 
-export function TaskProvider({ children }: { children: ReactNode }) {
-  const [tasks, setTasks] = useState<Task[]>(INITIAL_TASKS);
+  const refreshTasks = async () => {
+    setIsLoading(true);
+    try {
+      // Sincronizado con el ID del hogar 9 de tu base de datos
+      const data = await tareaService.getTareasPorHogar(9);
 
-  const addTask = (task: Omit<Task, 'id' | 'createdAt'>) => {
-    const newTask: Task = {
-      ...task,
-      id: Date.now().toString(),
-      createdAt: new Date().toISOString().split('T')[0],
-    };
-    setTasks(prev => [...prev, newTask]);
+      const normalizedTasks = data.map((t: any) => {
+        // Normalización de estados a Mayúsculas para evitar errores ts(2367)
+        let mappedStatus: TaskStatus = "PENDIENTE";
+        const rawStatus = (t.estado || "").toUpperCase();
+
+        if (rawStatus === "PENDIENTE") mappedStatus = "PENDIENTE";
+        else if (rawStatus === "EN_PROCESO" || rawStatus === "IN_PROGRESS")
+          mappedStatus = "EN_PROCESO";
+        else if (rawStatus === "COMPLETADA" || rawStatus === "COMPLETED")
+          mappedStatus = "COMPLETADA";
+
+        return {
+          id: (t.id || "").toString(),
+          title: t.nombre || "Sin título",
+          description: t.descripcion || "",
+          priority: (t.prioridad || "MEDIUM").toUpperCase() as TaskPriority,
+          status: mappedStatus,
+          dueDate: t.fechaLimite || "",
+          assignedTo: t.usuarioAsignadoId
+            ? t.usuarioAsignadoId.toString()
+            : null,
+          usuarioAsignadoNombre: t.usuarioAsignadoNombre || null, // Captura el nombre de Juana o Michael
+          createdBy: user?.id?.toString() || "1",
+        };
+      });
+
+      setTasks(normalizedTasks);
+    } catch (error) {
+      console.error("Error al obtener tareas:", error);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const updateTask = (id: string, updates: Partial<Task>) => {
-    setTasks(prev =>
-      prev.map(task => (task.id === id ? { ...task, ...updates } : task))
-    );
+  const addTask = async (taskData: Omit<Task, "id">) => {
+    try {
+      const payload = {
+        usuarioId: Number(user?.id) || 1,
+        nombre: taskData.title,
+        descripcion: taskData.description,
+        prioridad: taskData.priority,
+        fechaLimite: taskData.dueDate,
+        hogarId: 9,
+      };
+
+      const response = await tareaService.registrarTarea(payload);
+      if (response) {
+        await refreshTasks();
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error("Error en addTask:", error);
+      return false;
+    }
   };
 
-  const deleteTask = (id: string) => {
-    setTasks(prev => prev.filter(task => task.id !== id));
+  const deleteTask = async (id: string) => {
+    try {
+      // Conversión a número para cumplir con la firma del Service
+      await tareaService.eliminarTarea(Number(id));
+      await refreshTasks();
+    } catch (error) {
+      console.error("Error al eliminar:", error);
+    }
   };
 
-  const assignTask = (taskId: string, userId: string, userName: string) => {
-    setTasks(prev =>
-      prev.map(task =>
-        task.id === taskId
-          ? { ...task, assignedTo: userId, assignedToName: userName }
-          : task
-      )
-    );
+  const assignTask = async (taskId: string, userId: string) => {
+    try {
+      // Reparación del error ts(2345) mediante conversión explícita
+      await tareaService.asignarTareaAUser(Number(taskId), Number(userId));
+
+      // Tras asignar a Juana Ruiz, refrescamos para ver su nombre en la tarjeta
+      await refreshTasks();
+    } catch (error) {
+      console.error("Error al asignar:", error);
+    }
   };
+
+  useEffect(() => {
+    refreshTasks();
+  }, []);
 
   return (
     <TaskContext.Provider
-      value={{ tasks, addTask, updateTask, deleteTask, assignTask }}
+      value={{
+        tasks,
+        addTask,
+        deleteTask,
+        assignTask,
+        refreshTasks,
+        isLoading,
+      }}
     >
       {children}
     </TaskContext.Provider>
   );
-}
+};
 
-export function useTasks() {
+export const useTasks = () => {
   const context = useContext(TaskContext);
-  if (context === undefined) {
-    throw new Error('useTasks must be used within a TaskProvider');
-  }
+  if (!context) throw new Error("useTasks debe usarse dentro de TaskProvider");
   return context;
-}
+};

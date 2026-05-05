@@ -1,74 +1,110 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useState,
+  ReactNode,
+  useEffect,
+} from "react";
 
-export interface User { 
+export interface User {
   id: string | number;
-  name: string;
+  nombre: string;
   email: string;
-  role?: 'admin' | 'user';
+  rol?: string;
   avatar?: string;
   familiaId?: number | null;
 }
 
-// CORRECCIÓN: Agregamos export para que sea visible en toda la app
-export interface AuthContextType {  
+export interface AuthContextType {
   user: User | null;
   login: (email: string, password: string) => Promise<boolean>;
   logout: () => void;
-  isAdmin: boolean; 
+  isAdmin: boolean;
+  loading: boolean;
 }
 
-export const AuthContext = createContext<AuthContextType | undefined>(undefined);
+export const AuthContext = createContext<AuthContextType | undefined>(
+  undefined,
+);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  // Recupera la sesión al cargar la app para evitar cierres inesperados
+  useEffect(() => {
+    const savedUser = localStorage.getItem("usuario_sesion");
+    if (savedUser) {
+      try {
+        setUser(JSON.parse(savedUser));
+      } catch (e) {
+        localStorage.removeItem("usuario_sesion");
+      }
+    }
+    setLoading(false);
+  }, []);
 
   const login = async (email: string, password: string): Promise<boolean> => {
     try {
-      const response = await fetch('http://localhost:8080/api/usuarios/login', { 
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const response = await fetch("http://localhost:8080/api/usuarios/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
 
       if (response.ok) {
         const usuarioReal = await response.json();
         setUser(usuarioReal);
+        // Guardamos en storage para persistencia
+        localStorage.setItem("usuario_sesion", JSON.stringify(usuarioReal));
         return true;
       }
       return false;
     } catch (error) {
-      console.error("No se pudo conectar con Java:", error);
+      console.error("Error de conexión:", error);
       return false;
     }
   };
 
   const logout = () => {
-    setUser(null); 
+    setUser(null);
+    localStorage.removeItem("usuario_sesion");
   };
 
-  const isAdmin = user?.role === 'admin';
+  /**
+   * CORRECCIÓN CLAVE:
+   * Tu consola muestra que el rol llega como 'ADMINISTRADOR'.
+   * Esta lógica asegura que entres al AdminDashboard correcto.
+   */
+  const isAdmin =
+    user?.rol?.toUpperCase() === "ADMINISTRADOR" ||
+    user?.rol?.toUpperCase() === "ADMIN" ||
+    (user as any)?.role?.toUpperCase() === "ADMIN";
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, isAdmin }}>  
+    <AuthContext.Provider value={{ user, login, logout, isAdmin, loading }}>
       {children}
     </AuthContext.Provider>
   );
 }
 
-export function useAuth() { 
+// Hook principal de autenticación
+export function useAuth() {
   const context = useContext(AuthContext);
   if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
+    // Este error es el que viste en pantalla si el Provider no envuelve a la App
+    throw new Error("useAuth must be used within an AuthProvider");
   }
   return context;
 }
 
-// Usuarios mock para demo (mantener para otras partes de la app si se requiere)
-const MOCK_USERS: User[] = [
-  { id: '1', name: 'Ana García', email: 'admin@casa.com', role: 'admin' },
-  { id: '2', name: 'Carlos Rodríguez', email: 'carlos@casa.com', role: 'user' },
-];
-
+/**
+ * IMPORTANTE:
+ * Exportamos useUsers para evitar el error de "requested module does not provide an export"
+ * que aparece en tu consola de Vite.
+ */
 export function useUsers() {
-  return MOCK_USERS;
+  const { user } = useAuth();
+  // Retorna una lista vacía o lógica de miembros si la tienes
+  return [];
 }

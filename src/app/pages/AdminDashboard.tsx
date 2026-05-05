@@ -1,33 +1,41 @@
-import React, { useState } from 'react';
-import { useAuth } from '../contexts/AuthContext';
-import { useTasks } from '../contexts/TaskContext';
-import { TaskCard } from '../components/TaskCard';
-import { TaskCalendar } from '../components/TaskCalendar';
-import { CreateTaskDialog } from '../components/CreateTaskDialog';
-import { AssignTaskDialog } from '../components/AssignTaskDialog';
-import { OverdueTasksReport } from '../components/OverdueTasksReport';
-import { TaskDistributionReport } from '../components/TaskDistributionReport';
-// HU-05: importar el panel de miembros
-import { MembersPanel } from '../components/MembersPanel';
-import { Button } from '../components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import React, { useState, useEffect } from "react";
+import { useAuth } from "../contexts/AuthContext";
+import { useTasks } from "../contexts/TaskContext";
+import { TaskCard } from "../components/TaskCard";
+import { CreateTaskDialog } from "../components/CreateTaskDialog";
+import { AssignTaskDialog } from "../components/AssignTaskDialog";
+import { OverdueTasksReport } from "../components/OverdueTasksReport";
+import { TaskDistributionReport } from "../components/TaskDistributionReport";
+import { MembersPanel } from "../components/MembersPanel";
+import { Button } from "../components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "../components/ui/card";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "../components/ui/tabs";
 import {
   LogOut,
   Plus,
   Clock,
   AlertCircle,
   Users,
-  Calendar as CalendarIcon,
   List,
   BarChart3,
-} from 'lucide-react';
-import { useNavigate } from 'react-router';
-import { toast } from 'sonner';
+  Loader2,
+} from "lucide-react";
+import { useNavigate } from "react-router";
+import { toast } from "sonner";
 
 export default function AdminDashboard() {
   const { user, logout } = useAuth();
-  const { tasks, addTask, deleteTask, assignTask } = useTasks();
+  const { tasks, deleteTask, assignTask, refreshTasks, isLoading } = useTasks();
   const navigate = useNavigate();
 
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -36,29 +44,43 @@ export default function AdminDashboard() {
     id: string;
     title: string;
   } | null>(null);
-  const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
-  const [activeTab, setActiveTab] = useState<'tasks' | 'members' | 'reports'>(
-    'tasks'
+  const [activeTab, setActiveTab] = useState<"tasks" | "members" | "reports">(
+    "tasks",
   );
 
-  const pendingTasks = tasks.filter((t) => t.status === 'pending');
-  const inProgressTasks = tasks.filter((t) => t.status === 'in-progress');
-  const completedTasks = tasks.filter((t) => t.status === 'completed');
-  const unassignedTasks = tasks.filter((t) => !t.assignedTo);
+  // --- SINCRONIZACIÓN INICIAL ---
+  useEffect(() => {
+    refreshTasks();
+  }, []);
+
+  // --- LÓGICA DE NORMALIZACIÓN Y FILTRADO ---
+  const normalizedTasks = tasks.map((t: any) => ({
+    ...t,
+    displayTitle: t.title || t.nombre || "Sin título",
+    normalizedStatus: (t.status || t.estado || "PENDIENTE").toUpperCase(),
+    isUnassigned: !t.assignedTo && !t.usuarioAsignadoId,
+  }));
+
+  const pendingTasks = normalizedTasks.filter(
+    (t) =>
+      t.normalizedStatus === "PENDIENTE" || t.normalizedStatus === "PENDING",
+  );
+  const inProgressTasks = normalizedTasks.filter(
+    (t) =>
+      t.normalizedStatus === "EN_PROCESO" ||
+      t.normalizedStatus === "IN-PROGRESS",
+  );
+  const unassignedTasks = normalizedTasks.filter((t) => t.isUnassigned);
 
   const handleLogout = () => {
     logout();
-    navigate('/');
-    toast.success('Sesión cerrada exitosamente');
+    navigate("/");
+    toast.success("Sesión cerrada exitosamente");
   };
 
-  const handleCreateTask = (taskData: any) => {
-    addTask(taskData);
-  };
-
-  const handleDeleteTask = (taskId: string) => {
-    deleteTask(taskId);
-    toast.success('Tarea eliminada exitosamente');
+  const handleDeleteTask = async (taskId: string) => {
+    await deleteTask(taskId);
+    toast.success("Tarea eliminada exitosamente");
   };
 
   const handleAssignClick = (taskId: string, taskTitle: string) => {
@@ -66,61 +88,47 @@ export default function AdminDashboard() {
     setIsAssignDialogOpen(true);
   };
 
-  const handleAssignTask = (userId: string, userName: string) => {
+  const handleAssignTask = async (userId: string, userName: string) => {
     if (selectedTaskForAssign) {
-      assignTask(selectedTaskForAssign.id, userId, userName);
+      await assignTask(selectedTaskForAssign.id, userId, userName);
+      setIsAssignDialogOpen(false);
+      toast.success(`Tarea asignada a ${userName}`);
     }
   };
 
-  const handleTaskClick = (task: any) => {
-    toast.info(`Tarea: ${task.title}`);
-  };
-
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-100">
+    <div className="min-h-screen bg-slate-50">
       {/* Header */}
-      <header className="bg-white shadow-sm">
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">
+              <h1 className="text-2xl font-bold text-slate-900">
                 Panel de Administración
               </h1>
-              <p className="text-sm text-gray-600">
-                Bienvenido, {user?.name}
+              <p className="text-sm text-slate-500">
+                Bienvenido,{" "}
+                <span className="font-semibold text-indigo-600">
+                  {(user as any)?.nombre || "Administrador"}
+                </span>
               </p>
             </div>
+
             <div className="flex gap-2">
-              {/* Botón Nueva Tarea solo visible en pestaña de tareas */}
-              {activeTab === 'tasks' && (
-                <Button onClick={() => setIsCreateDialogOpen(true)}>
-                  <Plus className="w-4 h-4 mr-2" />
-                  Nueva Tarea
-                </Button>
-              )}
-              {activeTab === 'tasks' && (
-                <div className="flex bg-gray-100 rounded-md p-1">
-                  <Button
-                    variant={viewMode === 'list' ? 'default' : 'ghost'}
-                    size="sm"
-                    onClick={() => setViewMode('list')}
-                  >
-                    <List className="w-4 h-4 mr-2" />
-                    Lista
-                  </Button>
-                  <Button
-                    variant={viewMode === 'calendar' ? 'default' : 'ghost'}
-                    size="sm"
-                    onClick={() => setViewMode('calendar')}
-                  >
-                    <CalendarIcon className="w-4 h-4 mr-2" />
-                    Calendario
-                  </Button>
-                </div>
-              )}
-              <Button variant="outline" onClick={handleLogout}>
+              <Button
+                onClick={() => setIsCreateDialogOpen(true)}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Nueva Tarea
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={handleLogout}
+                className="text-slate-600"
+              >
                 <LogOut className="w-4 h-4 mr-2" />
-                Cerrar sesión
+                Salir
               </Button>
             </div>
           </div>
@@ -131,110 +139,119 @@ export default function AdminDashboard() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <Tabs
           value={activeTab}
-          onValueChange={(v) =>
-            setActiveTab(v as 'tasks' | 'members' | 'reports')
-          }
+          onValueChange={(v) => setActiveTab(v as any)}
           className="space-y-6"
         >
-          <TabsList>
-            <TabsTrigger value="tasks">
-              <List className="w-4 h-4 mr-2" />
-              Tareas
+          <TabsList className="bg-white border border-slate-200">
+            <TabsTrigger
+              value="tasks"
+              className="data-[state=active]:bg-slate-100"
+            >
+              <List className="w-4 h-4 mr-2" /> Tareas
             </TabsTrigger>
-
-            {/* HU-05: Nueva pestaña de Miembros */}
-            <TabsTrigger value="members">
-              <Users className="w-4 h-4 mr-2" />
-              Miembros
+            <TabsTrigger
+              value="members"
+              className="data-[state=active]:bg-slate-100"
+            >
+              <Users className="w-4 h-4 mr-2" /> Miembros
             </TabsTrigger>
-
-            <TabsTrigger value="reports">
-              <BarChart3 className="w-4 h-4 mr-2" />
-              Reportes
+            <TabsTrigger
+              value="reports"
+              className="data-[state=active]:bg-slate-100"
+            >
+              <BarChart3 className="w-4 h-4 mr-2" /> Reportes
             </TabsTrigger>
           </TabsList>
 
-          {/* ── PESTAÑA TAREAS ── */}
           <TabsContent value="tasks" className="space-y-6">
-            {/* Stats */}
+            {/* Stats Cards */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">
-                    Total Tareas
+              <Card className="border-none shadow-sm">
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-xs font-bold uppercase text-slate-500">
+                    Total
                   </CardTitle>
-                  <AlertCircle className="h-4 w-4 text-gray-600" />
+                  <AlertCircle className="h-4 w-4 text-slate-400" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">{tasks.length}</div>
+                  <div className="text-3xl font-black">
+                    {normalizedTasks.length}
+                  </div>
                 </CardContent>
               </Card>
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">
+              <Card className="border-none shadow-sm">
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-xs font-bold uppercase text-yellow-600">
                     Pendientes
                   </CardTitle>
-                  <Clock className="h-4 w-4 text-yellow-600" />
+                  <Clock className="h-4 w-4 text-yellow-500" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">
+                  <div className="text-3xl font-black">
                     {pendingTasks.length}
                   </div>
                 </CardContent>
               </Card>
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">
+              <Card className="border-none shadow-sm">
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-xs font-bold uppercase text-blue-600">
                     En Proceso
                   </CardTitle>
-                  <Clock className="h-4 w-4 text-blue-600" />
+                  <Loader2
+                    className={`h-4 w-4 text-blue-500 ${isLoading ? "animate-spin" : ""}`}
+                  />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">
+                  <div className="text-3xl font-black">
                     {inProgressTasks.length}
                   </div>
                 </CardContent>
               </Card>
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">
+              <Card className="border-none shadow-sm">
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-xs font-bold uppercase text-orange-600">
                     Sin Asignar
                   </CardTitle>
-                  <Users className="h-4 w-4 text-orange-600" />
+                  <Users className="h-4 w-4 text-orange-500" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">
+                  <div className="text-3xl font-black">
                     {unassignedTasks.length}
                   </div>
                 </CardContent>
               </Card>
             </div>
 
-            {viewMode === 'calendar' && (
-              <TaskCalendar tasks={tasks} onTaskClick={handleTaskClick} />
-            )}
-
-            {viewMode === 'list' && (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {tasks.length === 0 ? (
-                  <Card className="col-span-full">
-                    <CardContent className="py-12 text-center">
-                      <p className="text-gray-500 mb-4">
-                        No hay tareas creadas
-                      </p>
-                      <Button onClick={() => setIsCreateDialogOpen(true)}>
-                        <Plus className="w-4 h-4 mr-2" />
-                        Crear primera tarea
-                      </Button>
-                    </CardContent>
+            {/* Listado de Tareas */}
+            {isLoading ? (
+              <div className="flex flex-col items-center justify-center py-12">
+                <Loader2 className="w-8 h-8 animate-spin text-indigo-600 mb-2" />
+                <p className="text-slate-500 text-sm">Cargando tareas...</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {normalizedTasks.length === 0 ? (
+                  <Card className="col-span-full py-20 text-center border-dashed bg-transparent border-slate-300">
+                    <p className="text-slate-400">
+                      No se encontraron tareas en el hogar.
+                    </p>
+                    <Button
+                      variant="link"
+                      onClick={() => refreshTasks()}
+                      className="mt-2 text-indigo-600"
+                    >
+                      Reintentar conexión
+                    </Button>
                   </Card>
                 ) : (
-                  tasks.map((task) => (
+                  normalizedTasks.map((task) => (
                     <TaskCard
                       key={task.id}
                       task={task}
                       onDelete={handleDeleteTask}
-                      onAssign={(id) => handleAssignClick(id, task.title)}
+                      onAssign={(id) =>
+                        handleAssignClick(id, task.displayTitle)
+                      }
                       isAdmin
                     />
                   ))
@@ -243,13 +260,11 @@ export default function AdminDashboard() {
             )}
           </TabsContent>
 
-          {/* ── PESTAÑA MIEMBROS (HU-05) ── */}
-          <TabsContent value="members" className="space-y-6">
+          <TabsContent value="members">
             <MembersPanel />
           </TabsContent>
 
-          {/* ── PESTAÑA REPORTES ── */}
-          <TabsContent value="reports" className="space-y-6">
+          <TabsContent value="reports">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <OverdueTasksReport tasks={tasks} />
               <TaskDistributionReport tasks={tasks} />
@@ -258,12 +273,10 @@ export default function AdminDashboard() {
         </Tabs>
       </main>
 
-      {/* Dialogs */}
+      {/* DIÁLOGOS CORREGIDOS */}
       <CreateTaskDialog
         open={isCreateDialogOpen}
         onOpenChange={setIsCreateDialogOpen}
-        onCreateTask={handleCreateTask}
-        userId={user?.id || ''}
       />
 
       {selectedTaskForAssign && (

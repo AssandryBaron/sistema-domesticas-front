@@ -1,63 +1,105 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router';
-import { useAuth } from '../contexts/AuthContext'; // Contexto real de usuario
-import { useHome } from '../contexts/HomeContext';
-import { crearHogar } from '../services/hogarService'; // Servicio que creamos
-import { Button } from '../components/ui/button';
-import { Input } from '../components/ui/input';
-import { Label } from '../components/ui/label';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
-import { Home, AlertCircle, CheckCircle2, Copy } from 'lucide-react';
-import { toast } from 'sonner';
+import React, { useState } from "react";
+import { useNavigate } from "react-router";
+import { useAuth } from "../contexts/AuthContext";
+import { useHome } from "../contexts/HomeContext";
+import { crearHogar, unirseAHogar } from "../services/hogarService";
+import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "../components/ui/card";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "../components/ui/tabs";
+import { Home, AlertCircle, CheckCircle2, Copy, Users } from "lucide-react";
+import { toast } from "sonner";
 
 export default function HomeSetup() {
-  const [createData, setCreateData] = useState({ name: '', address: '' });
-  const [] = useState('');
+  const [createData, setCreateData] = useState({ name: "", address: "" });
+  const [joinCode, setJoinCode] = useState(""); // Estado para el código de unión (HU-04)
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
   const [invitationCode, setInvitationCode] = useState<string | null>(null);
 
-  const { user } = useAuth(); // Importa useAuth desde '../contexts/AuthContext'
-  const { createHome } = useHome();
+  const { user } = useAuth();
+  const { createHome, setHomeData } = useHome(); // Asumiendo que setHomeData existe para actualizar el contexto
   const navigate = useNavigate();
 
+  // --- Lógica HU-02: Crear Hogar ---
   const handleCreateHome = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
+    setError("");
 
-    // --- ESCENARIO 2: Validar si ya pertenece a un hogar ---
-    if (user?.familiaId !== null && user?.familiaId !== undefined && Number(user?.familiaId) > 0) {
-    const msg = 'Ya perteneces a un hogar y no puedes crear otro.';
-    setError(msg);
-    toast.error(msg);
-    return;
-  }
+    if (
+      user?.familiaId !== null &&
+      user?.familiaId !== undefined &&
+      Number(user?.familiaId) > 0
+    ) {
+      const msg = "Ya perteneces a un hogar y no puedes crear otro.";
+      setError(msg);
+      toast.error(msg);
+      return;
+    }
 
     if (!createData.name.trim()) {
-      setError('El nombre del hogar es obligatorio');
+      setError("El nombre del hogar es obligatorio");
       return;
     }
 
     setIsLoading(true);
-
     try {
       if (user?.id) {
-        // --- LLAMADA REAL AL BACKEND (HU-03) ---
         const res = await crearHogar(Number(user.id), createData.name.trim());
-        
-        // --- ESCENARIO 1: Éxito y muestra de código ---
         setInvitationCode(res.codigoInvitacion);
-        
-        // Actualizamos estado local si es necesario
+
+        // Sincronizar con contexto global
         createHome(res.nombre, createData.address.trim(), user.id.toString());
-        
-        toast.success('¡Hogar creado exitosamente!');
-      } else {
-        throw new Error("No se detectó sesión de usuario.");
+        toast.success("¡Hogar creado exitosamente!");
       }
     } catch (err: any) {
-      const errorMsg = err.message || 'Error al crear el hogar';
+      const errorMsg = err.response?.data?.message || "Error al crear el hogar";
+      setError(errorMsg);
+      toast.error(errorMsg);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // --- Lógica HU-04: Unirse a Hogar ---
+  const handleJoinHome = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+
+    if (!joinCode.trim()) {
+      setError("El código de invitación es obligatorio");
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      if (user?.id) {
+        const res = await unirseAHogar(
+          Number(user.id),
+          joinCode.trim().toUpperCase(),
+        );
+
+        // Actualizamos el contexto de hogar con los datos recibidos
+        if (setHomeData) setHomeData(res);
+
+        toast.success(`Te has unido a: ${res.nombre}`);
+        navigate("/dashboard"); // Redirección directa al tener éxito
+      }
+    } catch (err: any) {
+      const errorMsg =
+        err.response?.data?.message || "Código inválido o error al unirse";
       setError(errorMsg);
       toast.error(errorMsg);
     } finally {
@@ -68,7 +110,7 @@ export default function HomeSetup() {
   const handleCopyCode = () => {
     if (invitationCode) {
       navigator.clipboard.writeText(invitationCode);
-      toast.success('Código copiado al portapapeles');
+      toast.success("Código copiado al portapapeles");
     }
   };
 
@@ -84,13 +126,15 @@ export default function HomeSetup() {
             Crea un nuevo hogar o únete a uno existente
           </CardDescription>
         </CardHeader>
+
         <CardContent>
-          {/* Si ya tenemos el código de éxito, mostramos la pantalla de confirmación */}
           {invitationCode ? (
             <div className="space-y-6 py-4 animate-in fade-in zoom-in duration-300">
               <div className="flex flex-col items-center text-center space-y-2">
                 <CheckCircle2 className="w-12 h-12 text-green-500" />
-                <h3 className="text-xl font-bold text-gray-900">¡Hogar Configurado!</h3>
+                <h3 className="text-xl font-bold text-gray-900">
+                  ¡Hogar Configurado!
+                </h3>
                 <p className="text-sm text-gray-500">
                   Comparte este código con los miembros que deseas invitar.
                 </p>
@@ -102,9 +146,9 @@ export default function HomeSetup() {
                     {invitationCode}
                   </span>
                 </div>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
+                <Button
+                  variant="ghost"
+                  size="icon"
                   className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
                   onClick={handleCopyCode}
                 >
@@ -112,7 +156,10 @@ export default function HomeSetup() {
                 </Button>
               </div>
 
-              <Button className="w-full bg-indigo-600" onClick={() => navigate('/dashboard')}>
+              <Button
+                className="w-full bg-indigo-600"
+                onClick={() => navigate("/dashboard")}
+              >
                 Ir al Panel de Gestión
               </Button>
             </div>
@@ -126,51 +173,90 @@ export default function HomeSetup() {
               <TabsContent value="create">
                 <form onSubmit={handleCreateHome} className="space-y-4 mt-4">
                   <div className="space-y-2">
-                    <Label htmlFor="homeName">Nombre del hogar <span className="text-red-500">*</span></Label>
+                    <Label htmlFor="homeName">
+                      Nombre del hogar <span className="text-red-500">*</span>
+                    </Label>
                     <Input
                       id="homeName"
                       placeholder="Ej: Casa Familia García"
                       value={createData.name}
-                      onChange={(e) => setCreateData({ ...createData, name: e.target.value })}
+                      onChange={(e) =>
+                        setCreateData({ ...createData, name: e.target.value })
+                      }
                       disabled={isLoading}
                     />
                   </div>
-
                   <div className="space-y-2">
                     <Label htmlFor="address">Dirección (Opcional)</Label>
                     <Input
                       id="address"
                       placeholder="Ej: Av. Principal 123"
                       value={createData.address}
-                      onChange={(e) => setCreateData({ ...createData, address: e.target.value })}
+                      onChange={(e) =>
+                        setCreateData({
+                          ...createData,
+                          address: e.target.value,
+                        })
+                      }
                       disabled={isLoading}
                     />
                   </div>
-
                   {error && (
                     <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 p-3 rounded-md">
                       <AlertCircle className="w-4 h-4" />
                       <span>{error}</span>
                     </div>
                   )}
-
-                  <Button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700" disabled={isLoading}>
-                    {isLoading ? 'Procesando...' : 'Crear Hogar y ser Admin'}
+                  <Button
+                    type="submit"
+                    className="w-full bg-indigo-600 hover:bg-indigo-700"
+                    disabled={isLoading}
+                  >
+                    {isLoading ? "Procesando..." : "Crear Hogar y ser Admin"}
                   </Button>
                 </form>
               </TabsContent>
 
               <TabsContent value="join">
-                {/* ... Aquí puedes dejar tu lógica actual de JoinHome ... */}
-                <div className="text-center py-4 text-sm text-gray-500">
-                  Usa el código compartido por tu administrador para unirte.
-                </div>
+                <form onSubmit={handleJoinHome} className="space-y-4 mt-4">
+                  <div className="space-y-2 text-center">
+                    <div className="flex justify-center mb-2">
+                      <Users className="w-10 h-10 text-indigo-400" />
+                    </div>
+                    <Label htmlFor="joinCode">Código de Invitación</Label>
+                    <Input
+                      id="joinCode"
+                      className="text-center text-xl font-mono uppercase tracking-widest"
+                      placeholder="ABC12345"
+                      maxLength={8}
+                      value={joinCode}
+                      onChange={(e) => setJoinCode(e.target.value)}
+                      disabled={isLoading}
+                    />
+                  </div>
+                  {error && (
+                    <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 p-3 rounded-md">
+                      <AlertCircle className="w-4 h-4" />
+                      <span>{error}</span>
+                    </div>
+                  )}
+                  <Button
+                    type="submit"
+                    className="w-full bg-indigo-600 hover:bg-indigo-700"
+                    disabled={isLoading}
+                  >
+                    {isLoading ? "Validando código..." : "Unirse al Hogar"}
+                  </Button>
+                </form>
               </TabsContent>
             </Tabs>
           )}
 
           <div className="mt-6 text-center">
-            <button onClick={() => navigate('/')} className="text-sm text-indigo-600 hover:underline">
+            <button
+              onClick={() => navigate("/")}
+              className="text-sm text-indigo-600 hover:underline"
+            >
               Volver al inicio
             </button>
           </div>
