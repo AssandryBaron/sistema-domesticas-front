@@ -13,7 +13,7 @@ export interface Task {
   status: TaskStatus;
   dueDate: string;
   assignedTo: string | null;
-  usuarioAsignadoNombre?: string | null; // Nuevo campo sincronizado con el Backend
+  usuarioAsignadoNombre?: string | null;
   createdBy: string;
 }
 
@@ -22,6 +22,7 @@ interface TaskContextType {
   addTask: (taskData: Omit<Task, "id">) => Promise<boolean>;
   deleteTask: (id: string) => Promise<void>;
   assignTask: (taskId: string, userId: string) => Promise<void>;
+  updateTaskStatus: (taskId: string, nuevoEstado: string) => Promise<void>; // Añadido para HU-11
   refreshTasks: () => Promise<void>;
   isLoading: boolean;
 }
@@ -36,13 +37,20 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({
   const { user } = useAuth();
 
   const refreshTasks = async () => {
+    // Si no hay usuario o no pertenece a ninguna familia/hogar, limpiamos las tareas
+    const hogarId = user?.familiaId || (user as any)?.hogarId;
+
+    if (!user || !hogarId) {
+      setTasks([]);
+      return;
+    }
+
     setIsLoading(true);
     try {
-      // Sincronizado con el ID del hogar 9 de tu base de datos
-      const data = await tareaService.getTareasPorHogar(9);
+      // Sincronizado dinámicamente con el hogar del usuario actual
+      const data = await tareaService.getTareasPorHogar(Number(hogarId));
 
       const normalizedTasks = data.map((t: any) => {
-        // Normalización de estados a Mayúsculas para evitar errores ts(2367)
         let mappedStatus: TaskStatus = "PENDIENTE";
         const rawStatus = (t.estado || "").toUpperCase();
 
@@ -62,7 +70,7 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({
           assignedTo: t.usuarioAsignadoId
             ? t.usuarioAsignadoId.toString()
             : null,
-          usuarioAsignadoNombre: t.usuarioAsignadoNombre || null, // Captura el nombre de Juana o Michael
+          usuarioAsignadoNombre: t.usuarioAsignadoNombre || null,
           createdBy: user?.id?.toString() || "1",
         };
       });
@@ -70,12 +78,16 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({
       setTasks(normalizedTasks);
     } catch (error) {
       console.error("Error al obtener tareas:", error);
+      setTasks([]); // Limpieza en caso de error
     } finally {
       setIsLoading(false);
     }
   };
 
   const addTask = async (taskData: Omit<Task, "id">) => {
+    const hogarId = user?.familiaId || (user as any)?.hogarId;
+    if (!hogarId) return false;
+
     try {
       const payload = {
         usuarioId: Number(user?.id) || 1,
@@ -83,7 +95,7 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({
         descripcion: taskData.description,
         prioridad: taskData.priority,
         fechaLimite: taskData.dueDate,
-        hogarId: 9,
+        hogarId: Number(hogarId), // Dinámico
       };
 
       const response = await tareaService.registrarTarea(payload);
@@ -98,11 +110,18 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   };
 
+  /**
+   * HU-10: Eliminar una tarea mandando de forma segura el ID del usuario actual
+   */
   const deleteTask = async (id: string) => {
+    if (!user?.id) {
+      console.error("No se puede eliminar la tarea: Usuario no autenticado");
+      return;
+    }
     try {
-      // Conversión a número para cumplir con la firma del Service
-      await tareaService.eliminarTarea(Number(id));
-      await refreshTasks();
+      // Pasamos el ID de la tarea y recuperamos dinámicamente el ID del usuario logueado
+      await tareaService.eliminarTarea(Number(id), Number(user.id));
+      await refreshTasks(); // Recarga la lista automáticamente en la pantalla
     } catch (error) {
       console.error("Error al eliminar:", error);
     }
@@ -110,19 +129,38 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const assignTask = async (taskId: string, userId: string) => {
     try {
-      // Reparación del error ts(2345) mediante conversión explícita
       await tareaService.asignarTareaAUser(Number(taskId), Number(userId));
-
-      // Tras asignar a Juana Ruiz, refrescamos para ver su nombre en la tarjeta
       await refreshTasks();
     } catch (error) {
       console.error("Error al asignar:", error);
     }
   };
 
+  /**
+   * HU-11: Cambiar el estado de una tarea vinculando el usuario autenticado
+   */
+  const updateTaskStatus = async (taskId: string, nuevoEstado: string) => {
+    if (!user?.id) {
+      console.error("No se puede actualizar el estado: Usuario no autenticado");
+      return;
+    }
+    try {
+      // Convierte los estados del Front ("EN_PROCESO") a los esperados por el Back si hiciera falta
+      await tareaService.cambiarEstadoTarea(
+        Number(taskId),
+        Number(user.id),
+        nuevoEstado,
+      );
+      await refreshTasks(); // Sincroniza el panel visual al instante
+    } catch (error) {
+      console.error("Error al cambiar estado:", error);
+    }
+  };
+
+  // Escucha cuando el usuario inicia o cierra sesión para recargar o limpiar
   useEffect(() => {
     refreshTasks();
-  }, []);
+  }, [user]);
 
   return (
     <TaskContext.Provider
@@ -131,6 +169,7 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({
         addTask,
         deleteTask,
         assignTask,
+        updateTaskStatus, // Expuesto para tus componentes
         refreshTasks,
         isLoading,
       }}

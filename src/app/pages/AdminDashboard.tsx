@@ -35,7 +35,15 @@ import { toast } from "sonner";
 
 export default function AdminDashboard() {
   const { user, logout } = useAuth();
-  const { tasks, deleteTask, assignTask, refreshTasks, isLoading } = useTasks();
+  // Inyectamos updateTaskStatus para conectar la funcionalidad HU-11 de Natalia
+  const {
+    tasks,
+    deleteTask,
+    assignTask,
+    updateTaskStatus,
+    refreshTasks,
+    isLoading,
+  } = useTasks();
   const navigate = useNavigate();
 
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -83,14 +91,27 @@ export default function AdminDashboard() {
     toast.success("Tarea eliminada exitosamente");
   };
 
+  // Manejador para actualizar el estado de la tarea (HU-11)
+  const handleStatusChange = async (taskId: string, nuevoEstado: string) => {
+    try {
+      await updateTaskStatus(taskId, nuevoEstado);
+      toast.success(
+        `Estado de la tarea actualizado a ${nuevoEstado.replace("_", " ")}`,
+      );
+    } catch (error) {
+      toast.error("No tienes permisos para modificar el estado de esta tarea");
+    }
+  };
+
   const handleAssignClick = (taskId: string, taskTitle: string) => {
     setSelectedTaskForAssign({ id: taskId, title: taskTitle });
     setIsAssignDialogOpen(true);
   };
 
+  // CORRECCIÓN AQUÍ: Quitamos el argumento sobrante "userName" al llamar a assignTask
   const handleAssignTask = async (userId: string, userName: string) => {
     if (selectedTaskForAssign) {
-      await assignTask(selectedTaskForAssign.id, userId, userName);
+      await assignTask(selectedTaskForAssign.id, userId); // Solo enviamos taskId y userId como espera useTasks
       setIsAssignDialogOpen(false);
       toast.success(`Tarea asignada a ${userName}`);
     }
@@ -168,10 +189,10 @@ export default function AdminDashboard() {
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <Card className="border-none shadow-sm">
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-xs font-bold uppercase text-slate-500">
+                  <CardTitle className="text-slate-500 text-xs font-bold uppercase">
                     Total
                   </CardTitle>
-                  <AlertCircle className="h-4 w-4 text-slate-400" />
+                  <AlertCircle className="text-slate-400 h-4 w-4" />
                 </CardHeader>
                 <CardContent>
                   <div className="text-3xl font-black">
@@ -184,7 +205,7 @@ export default function AdminDashboard() {
                   <CardTitle className="text-xs font-bold uppercase text-yellow-600">
                     Pendientes
                   </CardTitle>
-                  <Clock className="h-4 w-4 text-yellow-500" />
+                  <Clock className="text-yellow-500 h-4 w-4" />
                 </CardHeader>
                 <CardContent>
                   <div className="text-3xl font-black">
@@ -212,7 +233,7 @@ export default function AdminDashboard() {
                   <CardTitle className="text-xs font-bold uppercase text-orange-600">
                     Sin Asignar
                   </CardTitle>
-                  <Users className="h-4 w-4 text-orange-500" />
+                  <Users className="text-orange-500 h-4 w-4" />
                 </CardHeader>
                 <CardContent>
                   <div className="text-3xl font-black">
@@ -225,20 +246,20 @@ export default function AdminDashboard() {
             {/* Listado de Tareas */}
             {isLoading ? (
               <div className="flex flex-col items-center justify-center py-12">
-                <Loader2 className="w-8 h-8 animate-spin text-indigo-600 mb-2" />
+                <Loader2 className="text-indigo-600 w-8 h-8 animate-spin mb-2" />
                 <p className="text-slate-500 text-sm">Cargando tareas...</p>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {normalizedTasks.length === 0 ? (
-                  <Card className="col-span-full py-20 text-center border-dashed bg-transparent border-slate-300">
+                  <Card className="col-span-full border-slate-300 border-dashed bg-transparent py-20 text-center">
                     <p className="text-slate-400">
                       No se encontraron tareas en el hogar.
                     </p>
                     <Button
                       variant="link"
                       onClick={() => refreshTasks()}
-                      className="mt-2 text-indigo-600"
+                      className="text-indigo-600 mt-2"
                     >
                       Reintentar conexión
                     </Button>
@@ -249,6 +270,7 @@ export default function AdminDashboard() {
                       key={task.id}
                       task={task}
                       onDelete={handleDeleteTask}
+                      onStatusChange={handleStatusChange} // Conexión directa a la HU-11
                       onAssign={(id) =>
                         handleAssignClick(id, task.displayTitle)
                       }

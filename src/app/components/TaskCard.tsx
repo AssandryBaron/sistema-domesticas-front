@@ -64,7 +64,6 @@ export function TaskCard({
   isAdmin,
 }: TaskCardProps) {
   // Obtenemos la configuración visual basada en los datos de la tarea
-  // Usamos fallbacks (MEDIUM y PENDIENTE) por si el backend envía algo inesperado
   const priority = priorityConfig[task.priority] || priorityConfig.MEDIUM;
   const status = statusConfig[task.status] || statusConfig.PENDIENTE;
 
@@ -124,8 +123,8 @@ export function TaskCard({
 
         {/* Botones de Acción - Empujados al final de la tarjeta */}
         <div className="flex flex-wrap gap-2 pt-3 border-t mt-auto">
-          {/* ACCIONES PARA USUARIO ESTÁNDAR (Cambio de flujo) */}
-          {!isAdmin && onStatusChange && task.status !== "COMPLETADA" && (
+          {/* ACCIONES DE CAMBIO DE ESTADO (HU-11: Disponible para quien corresponda cambiarla) */}
+          {onStatusChange && task.status !== "COMPLETADA" && (
             <>
               {task.status === "PENDIENTE" && (
                 <Button
@@ -148,7 +147,7 @@ export function TaskCard({
             </>
           )}
 
-          {/* ACCIONES PARA ADMINISTRADOR (Gestión) */}
+          {/* ACCIONES EXCLUSIVAS PARA ADMINISTRADOR (Gestión y HU-10: Eliminar) */}
           {isAdmin && (
             <>
               {!task.assignedTo && onAssign && (
