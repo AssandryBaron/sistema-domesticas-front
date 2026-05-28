@@ -32,10 +32,10 @@ import {
 } from "lucide-react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
+import { hogarService } from "../services/hogarService";
 
 export default function AdminDashboard() {
   const { user, logout } = useAuth();
-  // Inyectamos updateTaskStatus para conectar la funcionalidad HU-11 de Natalia
   const {
     tasks,
     deleteTask,
@@ -56,27 +56,60 @@ export default function AdminDashboard() {
     "tasks",
   );
 
+  // Estado local para los miembros de la familia
+  const [familyMembers, setFamilyMembers] = useState<any[]>([]);
+
   // --- SINCRONIZACIÓN INICIAL ---
   useEffect(() => {
     refreshTasks();
   }, []);
 
-  // --- LÓGICA DE NORMALIZACIÓN Y FILTRADO ---
-  const normalizedTasks = tasks.map((t: any) => ({
-    ...t,
-    displayTitle: t.title || t.nombre || "Sin título",
-    normalizedStatus: (t.status || t.estado || "PENDIENTE").toUpperCase(),
-    isUnassigned: !t.assignedTo && !t.usuarioAsignadoId,
-  }));
+  // Sincronizar miembros cuando el usuario esté cargado
+  useEffect(() => {
+    if (user && (user as any).id) {
+      cargarMiembrosHogar(Number((user as any).id));
+    }
+  }, [user]);
 
-  const pendingTasks = normalizedTasks.filter(
-    (t) =>
-      t.normalizedStatus === "PENDIENTE" || t.normalizedStatus === "PENDING",
-  );
+  const cargarMiembrosHogar = async (uid: number) => {
+    try {
+      const response = await hogarService.obtenerMiembros(uid);
+      if (response && Array.isArray(response)) {
+        setFamilyMembers(response);
+      } else if (response && response.data && Array.isArray(response.data)) {
+        setFamilyMembers(response.data);
+      }
+    } catch (error) {
+      console.log("Cargando lista alternativa de miembros...");
+      if (user) {
+        setFamilyMembers([user]);
+      }
+    }
+  };
+
+  // --- LÓGICA DE NORMALIZACIÓN Y FILTRADO ---
+  const normalizedTasks = tasks.map((t: any) => {
+    const rawStatus = String(t.status || t.estado || "pending").toLowerCase();
+    let cleanStatus: "pending" | "in-progress" | "completed" = "pending";
+
+    if (rawStatus.includes("proceso") || rawStatus.includes("progress")) {
+      cleanStatus = "in-progress";
+    } else if (rawStatus.includes("complet") || rawStatus.includes("termina")) {
+      cleanStatus = "completed";
+    }
+
+    return {
+      ...t,
+      title: t.title || t.nombre || "Sin título",
+      displayTitle: t.title || t.nombre || "Sin título",
+      status: cleanStatus,
+      isUnassigned: !t.assignedTo && !t.usuarioAsignadoId,
+    };
+  });
+
+  const pendingTasks = normalizedTasks.filter((t) => t.status === "pending");
   const inProgressTasks = normalizedTasks.filter(
-    (t) =>
-      t.normalizedStatus === "EN_PROCESO" ||
-      t.normalizedStatus === "IN-PROGRESS",
+    (t) => t.status === "in-progress",
   );
   const unassignedTasks = normalizedTasks.filter((t) => t.isUnassigned);
 
@@ -91,13 +124,10 @@ export default function AdminDashboard() {
     toast.success("Tarea eliminada exitosamente");
   };
 
-  // Manejador para actualizar el estado de la tarea (HU-11)
   const handleStatusChange = async (taskId: string, nuevoEstado: string) => {
     try {
       await updateTaskStatus(taskId, nuevoEstado);
-      toast.success(
-        `Estado de la tarea actualizado a ${nuevoEstado.replace("_", " ")}`,
-      );
+      toast.success(`Estado de la tarea actualizado exitosamente`);
     } catch (error) {
       toast.error("No tienes permisos para modificar el estado de esta tarea");
     }
@@ -108,12 +138,27 @@ export default function AdminDashboard() {
     setIsAssignDialogOpen(true);
   };
 
-  // CORRECCIÓN AQUÍ: Quitamos el argumento sobrante "userName" al llamar a assignTask
+  // Asignación rápida desde el dropdown estético de la tarjeta
+  const handleDirectAssign = async (
+    taskId: string,
+    userId: string,
+    userName?: string,
+  ) => {
+    try {
+      await assignTask(taskId, userId);
+      toast.success(`Tarea asignada a ${userName || "Miembro"}`);
+      refreshTasks();
+    } catch (error) {
+      toast.error("Error al asignar el miembro");
+    }
+  };
+
   const handleAssignTask = async (userId: string, userName: string) => {
     if (selectedTaskForAssign) {
-      await assignTask(selectedTaskForAssign.id, userId); // Solo enviamos taskId y userId como espera useTasks
+      await assignTask(selectedTaskForAssign.id, userId);
       setIsAssignDialogOpen(false);
       toast.success(`Tarea asignada a ${userName}`);
+      refreshTasks();
     }
   };
 
@@ -130,7 +175,9 @@ export default function AdminDashboard() {
               <p className="text-sm text-slate-500">
                 Bienvenido,{" "}
                 <span className="font-semibold text-indigo-600">
-                  {(user as any)?.nombre || "Administrador"}
+                  {(user as any)?.nombre ||
+                    (user as any)?.name ||
+                    "Administrador"}
                 </span>
               </p>
             </div>
@@ -270,10 +317,9 @@ export default function AdminDashboard() {
                       key={task.id}
                       task={task}
                       onDelete={handleDeleteTask}
-                      onStatusChange={handleStatusChange} // Conexión directa a la HU-11
-                      onAssign={(id) =>
-                        handleAssignClick(id, task.displayTitle)
-                      }
+                      onStatusChange={handleStatusChange}
+                      onAssign={handleDirectAssign}
+                      members={familyMembers}
                       isAdmin
                     />
                   ))
@@ -295,7 +341,7 @@ export default function AdminDashboard() {
         </Tabs>
       </main>
 
-      {/* DIÁLOGOS CORREGIDOS */}
+      {/* DIÁLOGOS */}
       <CreateTaskDialog
         open={isCreateDialogOpen}
         onOpenChange={setIsCreateDialogOpen}

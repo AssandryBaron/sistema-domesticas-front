@@ -17,8 +17,8 @@ export interface TareaResponse {
   fechaLimite: string;
   estado: string;
   hogarId: number;
-  usuarioAsignadoId?: number;
-  usuarioAsignadoNombre?: string;
+  usuarioAsignadoId?: number | null;
+  usuarioAsignadoNombre?: string | null;
 }
 
 const API_URL = 'http://localhost:8080/api/tareas';
@@ -44,40 +44,64 @@ export const getTareasPorHogar = async (hogarId: number): Promise<TareaResponse[
   }
 };
 
-// ALIAS corregido para que use el ID del hogar dinámico que le pida tu Context/Componente
 export const obtenerTareas = (hogarId: number) => getTareasPorHogar(hogarId); 
 
 /**
  * HU-10: Eliminar una tarea (Solo Administrador)
- * Corregido: Ahora envía el usuarioId por parámetro de consulta (?usuarioId=X) como pide Natalia
  */
 export const eliminarTarea = async (taskId: number, usuarioId: number): Promise<void> => {
   await axios.delete(`${API_URL}/${taskId}`, {
-    params: {
-      usuarioId: usuarioId // Mapea con @RequestParam Long usuarioId del Back
-    }
+    params: { usuarioId }
   });
 };
 
 /**
  * HU-11: Cambiar el estado de una tarea
- * Añadido: Envía un PATCH con el objeto JSON que procesará el Map<String, Object> de Java
  */
-export const cambiarEstadoTarea = async (taskId: number, usuarioId: number, nuevoEstado: string): Promise<TareaResponse> => {
-  const response = await axios.patch<TareaResponse>(`${API_URL}/${taskId}/estado`, {
-    usuarioId: usuarioId, // Clave "usuarioId" requerida por body.get()
-    estado: nuevoEstado   // Clave "estado" requerida por body.get()
+export const cambiarEstadoTarea = async (taskId: number, usuarioId: number, nuevoEstado: string): Promise<any> => {
+  const response = await axios.patch(`${API_URL}/${taskId}/estado`, null, {
+    params: {
+      usuarioId: usuarioId,
+      nuevoEstado: nuevoEstado   
+    }
   });
   return response.data;
 };
 
 /**
- * HU-Extra: Asignar tarea a un usuario (Mantenemos tu función intacta por si la usan)
+ * HU-13: Asignar tarea a un usuario
+ * CORRECCIÓN: Se cambió de "/assignar/" a "/asignar/" con una sola 's' 
+ * para que coincida exactamente con tu Java.
  */
-export const asignarTareaAUser = async (taskId: number, usuarioId: number): Promise<TareaResponse> => {
-  const response = await axios.put<TareaResponse>(`${API_URL}/${taskId}/asignar/${usuarioId}`);
+export const asignarTareaAUser = async (taskId: number, usuarioId: number): Promise<any> => {
+  const response = await axios.put(`${API_URL}/${taskId}/asignar/${usuarioId}`);
   return response.data;
 };
 
-// ALIAS para asignarTarea
 export const asignarTarea = asignarTareaAUser;
+export const assignTask = asignarTareaAUser; 
+
+/**
+ * HU-14: Historial de tareas completadas
+ */
+export const getHistorialPorHogar = async (hogarId: number): Promise<TareaResponse[]> => {
+  try {
+    const response = await axios.get<TareaResponse[]>(`${API_URL}/hogar/${hogarId}/historial`);
+    return Array.isArray(response.data) ? response.data : [];
+  } catch (error) {
+    console.error("Error en getHistorialPorHogar:", error);
+    return [];
+  }
+};
+
+export const tareaService = {
+  registrarTarea,
+  getTareasPorHogar,
+  obtenerTareas,
+  eliminarTarea,
+  cambiarEstadoTarea,
+  asignarTareaAUser,
+  asignarTarea,
+  assignTask,
+  getHistorialPorHogar
+};

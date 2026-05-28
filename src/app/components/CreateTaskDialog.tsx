@@ -31,7 +31,7 @@ export function CreateTaskDialog({
   onOpenChange,
 }: CreateTaskDialogProps) {
   const { addTask } = useTasks();
-  const { user } = useAuth(); // Necesario para el createdBy
+  const { user } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
 
   const [formData, setFormData] = useState({
@@ -51,29 +51,33 @@ export function CreateTaskDialog({
 
     setIsLoading(true);
     try {
-      // 1. Corregimos el objeto para que coincida exactamente con Omit<Task, "id">
-      // 2. Aseguramos que 'createdBy' sea el ID del usuario actual
+      // Pasamos los datos limpios al contexto
       const success = await addTask({
         title: formData.title,
         description: formData.description,
-        priority: formData.priority, // Ya tiene el tipo TaskPriority
-        status: "PENDIENTE",
+        priority: formData.priority,
+        status: "pending" as any,
         assignedTo: null,
         dueDate: formData.dueDate,
         createdBy: user?.id?.toString() || "1",
-      });
+      } as any);
 
       if (success) {
-        toast.success("Tarea creada con éxito");
+        // CORRECCIÓN ASÍNCRONA: Cerramos el modal primero para liberar el árbol de componentes
+        // y luego disparamos la notificación limpia sin congelar la UI.
+        onOpenChange(false);
+
         setFormData({
           title: "",
           description: "",
           priority: "MEDIUM",
           dueDate: "",
         });
-        onOpenChange(false);
+
+        setTimeout(() => {
+          toast.success("Tarea creada con éxito");
+        }, 100);
       } else {
-        // Si llega aquí con Error 500, revisa los logs de tu Spring Boot
         toast.error("Error del servidor al crear la tarea");
       }
     } catch (error) {

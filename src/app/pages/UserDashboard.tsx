@@ -1,45 +1,115 @@
-import React, { useState } from 'react';
-import { useAuth } from '../contexts/AuthContext';
-import { useTasks } from '../contexts/TaskContext';
-import { TaskCard } from '../components/TaskCard';
-import { TaskCalendar } from '../components/TaskCalendar';
-import { Button } from '../components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
-import { Badge } from '../components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
-import { LogOut, CheckCircle2, Clock, AlertCircle, Calendar as CalendarIcon, List } from 'lucide-react';
-import { useNavigate } from 'react-router';
-import { toast } from 'sonner';
+import React, { useState, useEffect } from "react";
+import { useAuth } from "../contexts/AuthContext";
+import { useTasks } from "../contexts/TaskContext";
+import { TaskCard } from "../components/TaskCard";
+import { TaskCalendar } from "../components/TaskCalendar";
+import { Button } from "../components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "../components/ui/card";
+import { Badge } from "../components/ui/badge";
+import {
+  LogOut,
+  CheckCircle2,
+  Clock,
+  AlertCircle,
+  Calendar as CalendarIcon,
+  List,
+  Home,
+} from "lucide-react";
+import { useNavigate } from "react-router";
+import { toast } from "sonner";
 
 export default function UserDashboard() {
   const { user, logout } = useAuth();
-  const { tasks, updateTask } = useTasks();
+  const { tasks, updateTask, refreshTasks } = useTasks();
   const navigate = useNavigate();
-  const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
+  const [viewMode, setViewMode] = useState<"list" | "calendar">("list");
 
-  const myTasks = tasks.filter(task => task.assignedTo === user?.id);
-  const pendingTasks = myTasks.filter(t => t.status === 'pending');
-  const inProgressTasks = myTasks.filter(t => t.status === 'in-progress');
-  const completedTasks = myTasks.filter(t => t.status === 'completed');
+  useEffect(() => {
+    if (refreshTasks) {
+      refreshTasks();
+    }
+  }, []);
+
+  const safeTasks = Array.isArray(tasks) ? tasks : [];
+
+  // ======================================================================
+  // 🕵️‍♂️ LOG PARA VER LAS PROPIEDADES INTERNAS DE LAS TAREAS QUE LLEGARON
+  // ======================================================================
+  useEffect(() => {
+    if (safeTasks.length > 0) {
+      console.log(
+        "%c--- INSPECCIÓN DE TAREAS EN EL DASHBOARD ---",
+        "color: #ff9900; font-weight: bold;",
+      );
+      safeTasks.forEach((task, index) => {
+        console.log(`Tarea #${index + 1} (${task.title || task.nombre}):`, {
+          id: task.id,
+          assignedTo: task.assignedTo,
+          usuarioAsignadoId: task.usuarioAsignadoId,
+          status: task.status,
+          estado: task.estado,
+        });
+      });
+      console.log(
+        "%c-------------------------------------------",
+        "color: #ff9900; font-weight: bold;",
+      );
+    }
+  }, [safeTasks]);
+  // ======================================================================
+
+  /**
+   * 1. MIS TAREAS: Asignadas al ID del usuario actual (Toya)
+   */
+  const myTasks = safeTasks.filter((task) => {
+    if (!user?.id || !task) return false;
+    const assignedId = task.assignedTo || task.usuarioAsignadoId;
+    return assignedId !== null && String(assignedId) === String(user.id);
+  });
+
+  /**
+   * 2. TAREAS DEL HOGAR: Tareas que pertenecen al hogar pero NO están asignadas al usuario actual
+   */
+  const householdTasks = safeTasks.filter((task) => {
+    if (!user?.id || !task) return false;
+    const assignedId = task.assignedTo || task.usuarioAsignadoId;
+    return !assignedId || String(assignedId) !== String(user.id);
+  });
+
+  // SOLUCIÓN DEFINITIVA AL ERROR ts(2367): Evaluamos únicamente los tipos válidos admitidos por TaskStatus
+  const pendingTasks = myTasks.filter((t) => t.status === "pending");
+  const inProgressTasks = myTasks.filter((t) => t.status === "in-progress");
+  const completedTasks = myTasks.filter((t) => t.status === "completed");
 
   const handleLogout = () => {
     logout();
-    navigate('/');
-    toast.success('Sesión cerrada exitosamente');
+    navigate("/");
+    toast.success("Sesión cerrada exitosamente");
   };
 
-  const handleStatusChange = (taskId: string, status: 'pending' | 'in-progress' | 'completed') => {
-    updateTask(taskId, { status });
-    
-    if (status === 'in-progress') {
-      toast.success('Tarea iniciada');
-    } else if (status === 'completed') {
-      toast.success('¡Tarea completada! Buen trabajo');
+  const handleStatusChange = (taskId: string, status: any) => {
+    if (updateTask) {
+      updateTask(taskId, { status });
+    }
+
+    const upperStatus = String(status).toUpperCase();
+    if (upperStatus.includes("PROCESO") || upperStatus.includes("PROGRESS")) {
+      toast.success("Tarea iniciada");
+    } else if (
+      upperStatus.includes("COMPLET") ||
+      upperStatus.includes("TERMINA")
+    ) {
+      toast.success("¡Tarea completada! Buen trabajo");
     }
   };
 
   const handleTaskClick = (task: any) => {
-    toast.info(`Tarea: ${task.title}`);
+    toast.info(`Tarea: ${task.title || task.nombre || "Sin título"}`);
   };
 
   return (
@@ -50,22 +120,24 @@ export default function UserDashboard() {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Mis Tareas</h1>
-              <p className="text-sm text-gray-600">Bienvenido, {user?.name}</p>
+              <p className="text-sm text-gray-600">
+                Bienvenido, {user?.name || (user as any)?.nombre || "Usuario"}
+              </p>
             </div>
             <div className="flex gap-2">
               <div className="flex bg-gray-100 rounded-md p-1">
                 <Button
-                  variant={viewMode === 'list' ? 'default' : 'ghost'}
+                  variant={viewMode === "list" ? "default" : "ghost"}
                   size="sm"
-                  onClick={() => setViewMode('list')}
+                  onClick={() => setViewMode("list")}
                 >
                   <List className="w-4 h-4 mr-2" />
                   Lista
                 </Button>
                 <Button
-                  variant={viewMode === 'calendar' ? 'default' : 'ghost'}
+                  variant={viewMode === "calendar" ? "default" : "ghost"}
                   size="sm"
-                  onClick={() => setViewMode('calendar')}
+                  onClick={() => setViewMode("calendar")}
                 >
                   <CalendarIcon className="w-4 h-4 mr-2" />
                   Calendario
@@ -82,7 +154,7 @@ export default function UserDashboard() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Stats */}
+        {/* Contadores de mis tareas */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -113,78 +185,103 @@ export default function UserDashboard() {
           </Card>
         </div>
 
-        {/* Calendar View */}
-        {viewMode === 'calendar' && (
+        {viewMode === "calendar" && (
           <TaskCalendar tasks={myTasks} onTaskClick={handleTaskClick} />
         )}
 
-        {/* List View */}
-        {viewMode === 'list' && (
-          <>
-            {/* Tasks */}
-            {myTasks.length === 0 ? (
-              <Card>
-                <CardContent className="py-12 text-center">
-                  <p className="text-gray-500">No tienes tareas asignadas</p>
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="space-y-6">
-                {/* Pending Tasks */}
-                {pendingTasks.length > 0 && (
-                  <div>
-                    <div className="flex items-center gap-2 mb-4">
-                      <h2 className="text-xl font-semibold">Pendientes</h2>
-                      <Badge variant="secondary">{pendingTasks.length}</Badge>
+        {viewMode === "list" && (
+          <div className="space-y-8">
+            {/* SECCIÓN 1: MIS TAREAS ASIGNADAS */}
+            <div>
+              {myTasks.length === 0 ? (
+                <Card className="border-dashed border-2">
+                  <CardContent className="py-8 text-center">
+                    <p className="text-gray-500">
+                      No tienes tareas asignadas directamente a ti.
+                    </p>
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="space-y-6">
+                  {pendingTasks.length > 0 && (
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-700 mb-3">
+                        Mis Pendientes
+                      </h2>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {pendingTasks.map((task) => (
+                          <TaskCard
+                            key={task.id}
+                            task={task}
+                            onStatusChange={handleStatusChange}
+                          />
+                        ))}
+                      </div>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {pendingTasks.map(task => (
-                        <TaskCard
-                          key={task.id}
-                          task={task}
-                          onStatusChange={handleStatusChange}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                )}
+                  )}
 
-                {/* In Progress Tasks */}
-                {inProgressTasks.length > 0 && (
-                  <div>
-                    <div className="flex items-center gap-2 mb-4">
-                      <h2 className="text-xl font-semibold">En Proceso</h2>
-                      <Badge variant="secondary">{inProgressTasks.length}</Badge>
+                  {inProgressTasks.length > 0 && (
+                    <div>
+                      <h2 className="text-lg font-semibold text-blue-700 mb-3">
+                        Mis Tareas en Proceso
+                      </h2>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {inProgressTasks.map((task) => (
+                          <TaskCard
+                            key={task.id}
+                            task={task}
+                            onStatusChange={handleStatusChange}
+                          />
+                        ))}
+                      </div>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {inProgressTasks.map(task => (
-                        <TaskCard
-                          key={task.id}
-                          task={task}
-                          onStatusChange={handleStatusChange}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                )}
+                  )}
 
-                {/* Completed Tasks */}
-                {completedTasks.length > 0 && (
-                  <div>
-                    <div className="flex items-center gap-2 mb-4">
-                      <h2 className="text-xl font-semibold">Completadas</h2>
-                      <Badge variant="secondary">{completedTasks.length}</Badge>
+                  {completedTasks.length > 0 && (
+                    <div>
+                      <h2 className="text-lg font-semibold text-green-700 mb-3">
+                        Mis Completadas
+                      </h2>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {completedTasks.map((task) => (
+                          <TaskCard
+                            key={task.id}
+                            task={task}
+                            onStatusChange={handleStatusChange}
+                          />
+                        ))}
+                      </div>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {completedTasks.map(task => (
-                        <TaskCard key={task.id} task={task} />
-                      ))}
-                    </div>
-                  </div>
-                )}
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* SECCIÓN 2: OTRAS TAREAS DEL HOGAR */}
+            {householdTasks.length > 0 && (
+              <div className="pt-6 border-t border-gray-200">
+                <div className="flex items-center gap-2 mb-4 text-gray-700">
+                  <Home className="w-5 h-5 text-indigo-500" />
+                  <h2 className="text-xl font-bold">Otras tareas del Hogar</h2>
+                  <Badge
+                    variant="outline"
+                    className="bg-indigo-50 text-indigo-700 border-indigo-200"
+                  >
+                    {householdTasks.length} disponibles
+                  </Badge>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {householdTasks.map((task) => (
+                    <TaskCard
+                      key={task.id}
+                      task={task}
+                      onStatusChange={handleStatusChange}
+                    />
+                  ))}
+                </div>
               </div>
             )}
-          </>
+          </div>
         )}
       </main>
     </div>

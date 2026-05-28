@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "../contexts/AuthContext";
 import { useHome } from "../contexts/HomeContext";
+import { useTasks } from "../contexts/TaskContext"; // Importado para sincronizar las tareas al instante
 import { crearHogar, unirseAHogar } from "../services/hogarService";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -24,13 +25,14 @@ import { toast } from "sonner";
 
 export default function HomeSetup() {
   const [createData, setCreateData] = useState({ name: "", address: "" });
-  const [joinCode, setJoinCode] = useState(""); // Estado para el código de unión (HU-04)
+  const [joinCode, setJoinCode] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [invitationCode, setInvitationCode] = useState<string | null>(null);
 
-  const { user } = useAuth();
-  const { createHome, setHomeData } = useHome(); // Asumiendo que setHomeData existe para actualizar el contexto
+  const { user, updateUserHome } = useAuth();
+  const { createHome, setHomeData } = useHome();
+  const { refreshTasks } = useTasks(); // Extraemos la función de refresco del contexto de tareas
   const navigate = useNavigate();
 
   // --- Lógica HU-02: Crear Hogar ---
@@ -57,11 +59,25 @@ export default function HomeSetup() {
     setIsLoading(true);
     try {
       if (user?.id) {
-        const res = await crearHogar(Number(user.id), createData.name.trim());
+        const res = (await crearHogar(
+          Number(user.id),
+          createData.name.trim(),
+        )) as any;
         setInvitationCode(res.codigoInvitacion);
 
-        // Sincronizar con contexto global
+        // ACTUALIZACIÓN DE SESIÓN GLOBAL
+        if (res.id) {
+          updateUserHome(Number(res.id));
+        }
+
+        // Sincronizar contextos
         createHome(res.nombre, createData.address.trim(), user.id.toString());
+
+        // Forzamos la actualización inmediata del listado de tareas del nuevo hogar
+        setTimeout(() => {
+          refreshTasks();
+        }, 300);
+
         toast.success("¡Hogar creado exitosamente!");
       }
     } catch (err: any) {
@@ -86,16 +102,32 @@ export default function HomeSetup() {
     setIsLoading(true);
     try {
       if (user?.id) {
-        const res = await unirseAHogar(
+        // Ejecutamos la petición y forzamos tipado 'any' de forma segura para res
+        const res = (await unirseAHogar(
           Number(user.id),
           joinCode.trim().toUpperCase(),
-        );
+        )) as any;
 
-        // Actualizamos el contexto de hogar con los datos recibidos
-        if (setHomeData) setHomeData(res);
+        // CORRECCIÓN DE TS(2339) Y SINCRONIZACIÓN DE SESIÓN GLOBAL
+        const nuevoHogarId = res?.id || res?.hogarId || res?.familiaId;
+        const nombreHogar = res?.nombre || res?.name || "Tu nuevo hogar";
 
-        toast.success(`Te has unido a: ${res.nombre}`);
-        navigate("/dashboard"); // Redirección directa al tener éxito
+        if (nuevoHogarId) {
+          updateUserHome(Number(nuevoHogarId));
+        }
+
+        // Actualizamos el contexto del hogar
+        if (setHomeData) {
+          setHomeData(res);
+        }
+
+        // DISPARADOR CRÍTICO: Sincroniza las tareas del nuevo hogar al instante en el backend
+        setTimeout(async () => {
+          await refreshTasks();
+        }, 200);
+
+        toast.success(`Te has unido a: ${nombreHogar}`);
+        navigate("/dashboard");
       }
     } catch (err: any) {
       const errorMsg =

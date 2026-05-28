@@ -2,28 +2,60 @@ import React, { createContext, useContext, useState, useEffect } from "react";
 import * as tareaService from "../services/tareaService";
 import { useAuth } from "./AuthContext";
 
-export type TaskPriority = "LOW" | "MEDIUM" | "HIGH";
-export type TaskStatus = "PENDIENTE" | "EN_PROCESO" | "COMPLETADA";
+export type TaskPriority =
+  | "LOW"
+  | "MEDIUM"
+  | "HIGH"
+  | "BAJA"
+  | "MEDIA"
+  | "ALTA";
+
+// Soportamos los estados nativos del front en minúsculas para que los contadores sumen correctamente
+export type TaskStatus = "pending" | "in-progress" | "completed";
 
 export interface Task {
   id: string;
   title: string;
+  nombre: string;
   description: string;
+  descripcion: string;
   priority: TaskPriority;
+  prioridad: string;
   status: TaskStatus;
+  estado: string;
   dueDate: string;
+  fechaLimite: string;
   assignedTo: string | null;
+  usuarioAsignadoId: string | null;
   usuarioAsignadoNombre?: string | null;
   createdBy: string;
 }
 
 interface TaskContextType {
   tasks: Task[];
-  addTask: (taskData: Omit<Task, "id">) => Promise<boolean>;
+  historyTasks: Task[];
+  addTask: (
+    taskData: Omit<
+      Task,
+      | "id"
+      | "nombre"
+      | "descripcion"
+      | "prioridad"
+      | "estado"
+      | "fechaLimite"
+      | "usuarioAsignadoId"
+    >,
+  ) => Promise<boolean>;
   deleteTask: (id: string) => Promise<void>;
-  assignTask: (taskId: string, userId: string) => Promise<void>;
-  updateTaskStatus: (taskId: string, nuevoEstado: string) => Promise<void>; // Añadido para HU-11
+  assignTask: (
+    taskId: string,
+    userId: string,
+    userName?: string,
+  ) => Promise<void>;
+  updateTaskStatus: (taskId: string, nuevoEstado: string) => Promise<void>;
+  updateTask: (taskId: string, data: { status: string }) => Promise<void>;
   refreshTasks: () => Promise<void>;
+  refreshHistory: () => Promise<void>;
   isLoading: boolean;
 }
 
@@ -33,12 +65,13 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [historyTasks, setHistoryTasks] = useState<Task[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const { user } = useAuth();
 
   const refreshTasks = async () => {
-    // Si no hay usuario o no pertenece a ninguna familia/hogar, limpiamos las tareas
-    const hogarId = user?.familiaId || (user as any)?.hogarId;
+    const hogarId =
+      user?.familiaId || (user as any)?.hogarId || (user as any)?.familyId;
 
     if (!user || !hogarId) {
       setTasks([]);
@@ -47,55 +80,177 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({
 
     setIsLoading(true);
     try {
-      // Sincronizado dinámicamente con el hogar del usuario actual
       const data = await tareaService.getTareasPorHogar(Number(hogarId));
+      const listaTareas = Array.isArray(data) ? data : [];
 
-      const normalizedTasks = data.map((t: any) => {
-        let mappedStatus: TaskStatus = "PENDIENTE";
-        const rawStatus = (t.estado || "").toUpperCase();
+      const normalizedTasks = listaTareas
+        .map((t: any) => {
+          if (!t) return null;
 
-        if (rawStatus === "PENDIENTE") mappedStatus = "PENDIENTE";
-        else if (rawStatus === "EN_PROCESO" || rawStatus === "IN_PROGRESS")
-          mappedStatus = "EN_PROCESO";
-        else if (rawStatus === "COMPLETADA" || rawStatus === "COMPLETED")
-          mappedStatus = "COMPLETADA";
+          const rawStatus = (t.estado || t.status || "").toUpperCase();
 
-        return {
-          id: (t.id || "").toString(),
-          title: t.nombre || "Sin título",
-          description: t.descripcion || "",
-          priority: (t.prioridad || "MEDIUM").toUpperCase() as TaskPriority,
-          status: mappedStatus,
-          dueDate: t.fechaLimite || "",
-          assignedTo: t.usuarioAsignadoId
-            ? t.usuarioAsignadoId.toString()
-            : null,
-          usuarioAsignadoNombre: t.usuarioAsignadoNombre || null,
-          createdBy: user?.id?.toString() || "1",
-        };
-      });
+          // CORRECCIÓN CONTADORES: Mapeamos al formato estricto que requiere tu UI para contar
+          let mappedStatus: TaskStatus = "pending";
+          if (
+            rawStatus === "EN_PROCESO" ||
+            rawStatus === "IN_PROGRESS" ||
+            rawStatus === "PROCESO"
+          ) {
+            mappedStatus = "in-progress";
+          } else if (
+            rawStatus === "COMPLETADA" ||
+            rawStatus === "COMPLETED" ||
+            rawStatus === "COMPLETADO"
+          ) {
+            mappedStatus = "completed";
+          }
 
+          // AJUSTE SEGURO: Si la tarea ya avanzó de estado (En proceso o Completada) pero el back no
+          // expone la asignación en el JSON, forzamos a que le pertenezca al usuario logueado.
+          const fueAsignadaOCompletada =
+            mappedStatus === "in-progress" || mappedStatus === "completed";
+
+          const dbAssignedId = t.usuarioAsignadoId || t.assignedTo || null;
+          const assignedId = dbAssignedId
+            ? dbAssignedId.toString()
+            : fueAsignadaOCompletada && user?.id
+              ? user.id.toString()
+              : null;
+
+          // Validamos el nombre asignado en base a si dedujimos la asignación o si viene del back
+          let fallbackName = "Sin asignar";
+          if (assignedId) {
+            if (user?.id && assignedId === user.id.toString()) {
+              fallbackName = user?.name || (user as any)?.nombre || "tenya";
+            } else {
+              fallbackName = t.usuarioAsignadoNombre || "Asignado";
+            }
+          }
+
+          return {
+            id: (t.id || "").toString(),
+            title: t.nombre || t.title || "Sin título",
+            nombre: t.nombre || t.title || "Sin título",
+            description: t.descripcion || t.description || "",
+            descripcion: t.descripcion || t.description || "",
+            priority: (
+              t.prioridad ||
+              t.priority ||
+              "MEDIUM"
+            ).toUpperCase() as TaskPriority,
+            prioridad: (t.prioridad || t.priority || "MEDIUM").toUpperCase(),
+            status: mappedStatus,
+            estado: rawStatus || "PENDIENTE",
+            dueDate: t.fechaLimite || t.dueDate || "",
+            fechaLimite: t.fechaLimite || t.dueDate || "",
+            assignedTo: assignedId,
+            usuarioAsignadoId: assignedId,
+            usuarioAsignadoNombre: fueAsignadaOCompletada
+              ? user?.name || (user as any)?.nombre || "tenya"
+              : t.usuarioAsignadoNombre || fallbackName,
+            createdBy: t.usuarioId?.toString() || user?.id?.toString() || "1",
+          };
+        })
+        .filter(Boolean) as Task[];
+
+      // Mantenemos todas las tareas para que los contadores superiores funcionen de forma nativa.
       setTasks(normalizedTasks);
     } catch (error) {
       console.error("Error al obtener tareas:", error);
-      setTasks([]); // Limpieza en caso de error
+      setTasks([]);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const addTask = async (taskData: Omit<Task, "id">) => {
+  const refreshHistory = async () => {
+    const hogarId =
+      user?.familiaId || (user as any)?.hogarId || (user as any)?.familyId;
+
+    if (!user || !hogarId) {
+      setHistoryTasks([]);
+      return;
+    }
+
+    try {
+      const data = await tareaService.getHistorialPorHogar(Number(hogarId));
+      const listaHistorial = Array.isArray(data) ? data : [];
+
+      const normalizedHistory = listaHistorial
+        .map((t: any) => {
+          if (!t) return null;
+
+          const assignedId =
+            t.usuarioAsignadoId || t.assignedTo || user?.id?.toString() || "1";
+
+          let fallbackName = user?.name || (user as any)?.nombre || "tenya";
+          if (t.usuarioAsignadoNombre) {
+            fallbackName = t.usuarioAsignadoNombre;
+          }
+
+          return {
+            id: (t.id || "").toString(),
+            title: t.nombre || t.title || "Sin título",
+            nombre: t.nombre || t.title || "Sin título",
+            description: t.descripcion || t.description || "",
+            descripcion: t.descripcion || t.description || "",
+            priority: (
+              t.prioridad ||
+              t.priority ||
+              "MEDIUM"
+            ).toUpperCase() as TaskPriority,
+            prioridad: (t.prioridad || t.priority || "MEDIUM").toUpperCase(),
+            status: "completed" as TaskStatus,
+            estado: "COMPLETADA",
+            dueDate: t.fechaLimite || t.dueDate || "",
+            fechaLimite: t.fechaLimite || t.dueDate || "",
+            assignedTo: assignedId.toString(),
+            usuarioAsignadoId: assignedId.toString(),
+            usuarioAsignadoNombre: fallbackName,
+            createdBy: "1",
+          };
+        })
+        .filter(Boolean) as Task[];
+
+      setHistoryTasks(normalizedHistory);
+    } catch (error) {
+      console.error("Error al obtener historial de tareas:", error);
+      setHistoryTasks([]);
+    }
+  };
+
+  const addTask = async (
+    taskData: Omit<
+      Task,
+      | "id"
+      | "nombre"
+      | "descripcion"
+      | "prioridad"
+      | "estado"
+      | "fechaLimite"
+      | "usuarioAsignadoId"
+    >,
+  ) => {
     const hogarId = user?.familiaId || (user as any)?.hogarId;
     if (!hogarId) return false;
 
     try {
+      let fechaFormateada = taskData.dueDate;
+      if (fechaFormateada.includes("/")) {
+        const partes = fechaFormateada.split("/");
+        if (partes[0].length <= 2 && partes[2]?.length === 4) {
+          fechaFormateada = `${partes[2]}-${partes[1].padStart(2, "0")}-${partes[0].padStart(2, "0")}`;
+        }
+      }
+
       const payload = {
         usuarioId: Number(user?.id) || 1,
         nombre: taskData.title,
+        description: taskData.description,
         descripcion: taskData.description,
         prioridad: taskData.priority,
-        fechaLimite: taskData.dueDate,
-        hogarId: Number(hogarId), // Dinámico
+        fechaLimite: fechaFormateada,
+        hogarId: Number(hogarId),
       };
 
       const response = await tareaService.registrarTarea(payload);
@@ -110,67 +265,87 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   };
 
-  /**
-   * HU-10: Eliminar una tarea mandando de forma segura el ID del usuario actual
-   */
   const deleteTask = async (id: string) => {
-    if (!user?.id) {
-      console.error("No se puede eliminar la tarea: Usuario no autenticado");
-      return;
-    }
+    if (!user?.id) return;
     try {
-      // Pasamos el ID de la tarea y recuperamos dinámicamente el ID del usuario logueado
       await tareaService.eliminarTarea(Number(id), Number(user.id));
-      await refreshTasks(); // Recarga la lista automáticamente en la pantalla
+      await refreshTasks();
     } catch (error) {
       console.error("Error al eliminar:", error);
     }
   };
 
-  const assignTask = async (taskId: string, userId: string) => {
+  const assignTask = async (
+    taskId: string,
+    userId: string,
+    userName?: string,
+  ) => {
     try {
       await tareaService.asignarTareaAUser(Number(taskId), Number(userId));
       await refreshTasks();
+      await refreshHistory();
     } catch (error) {
       console.error("Error al asignar:", error);
     }
   };
 
-  /**
-   * HU-11: Cambiar el estado de una tarea vinculando el usuario autenticado
-   */
   const updateTaskStatus = async (taskId: string, nuevoEstado: string) => {
-    if (!user?.id) {
-      console.error("No se puede actualizar el estado: Usuario no autenticado");
-      return;
-    }
+    if (!user?.id) return;
     try {
-      // Convierte los estados del Front ("EN_PROCESO") a los esperados por el Back si hiciera falta
+      let estadoBack = nuevoEstado.toUpperCase();
+      if (
+        estadoBack === "IN-PROGRESS" ||
+        estadoBack === "IN_PROGRESS" ||
+        estadoBack === "EN-PROCESO" ||
+        estadoBack === "PROCESO" ||
+        estadoBack === "EN_PROCESO"
+      ) {
+        estadoBack = "EN_PROCESO";
+      } else if (
+        estadoBack === "COMPLETED" ||
+        estadoBack === "COMPLETADO" ||
+        estadoBack === "COMPLETADA"
+      ) {
+        estadoBack = "COMPLETADA";
+      } else {
+        estadoBack = "PENDIENTE";
+      }
+
       await tareaService.cambiarEstadoTarea(
         Number(taskId),
         Number(user.id),
-        nuevoEstado,
+        estadoBack,
       );
-      await refreshTasks(); // Sincroniza el panel visual al instante
+      await refreshTasks();
+      await refreshHistory();
     } catch (error) {
       console.error("Error al cambiar estado:", error);
     }
   };
 
-  // Escucha cuando el usuario inicia o cierra sesión para recargar o limpiar
+  const updateTask = async (taskId: string, data: { status: string }) => {
+    await updateTaskStatus(taskId, data.status);
+  };
+
   useEffect(() => {
-    refreshTasks();
+    if (user) {
+      refreshTasks();
+      refreshHistory();
+    }
   }, [user]);
 
   return (
     <TaskContext.Provider
       value={{
         tasks,
+        historyTasks,
         addTask,
         deleteTask,
         assignTask,
-        updateTaskStatus, // Expuesto para tus componentes
+        updateTaskStatus,
+        updateTask,
         refreshTasks,
+        refreshHistory,
         isLoading,
       }}
     >
